@@ -6,7 +6,9 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from app.core.config import settings
+from app.services import backlog_client
 from app.services.bug_agent import BugProcessingResult, fetch_mcp_tool_schemas, process_email_for_bugs
+from app.services.dedup_service import deduplicate_issue
 from app.services.email_reader import EmailMessage, ImapEmailReader
 from app.services.mcp_client import mcp_session
 
@@ -27,6 +29,8 @@ class EmailProcessingResult(BaseModel):
     marked_as_read: bool
     skipped: bool
     skip_reason: Optional[str]
+    dedup_action: Optional[str] = None
+    dedup_duplicate_of: Optional[str] = None
 
 
 def _email_age_hours(email: EmailMessage) -> Optional[float]:
@@ -114,7 +118,21 @@ async def process_unread_emails(
             )
 
         marked_as_read = False
+        dedup_action = None
+        dedup_duplicate_of = None
+
         if agent_result.is_bug:
+            # Déduplication pour les nouveaux bugs créés (avant mark_as_read pour connaître l'outcome)
+            if agent_result.action == "created" and agent_result.issue_id:
+                try:
+                    issue = backlog_client.get_issue(agent_result.issue_id)
+                    outcome = deduplicate_issue(issue)
+                    dedup_action = outcome.action
+                    dedup_duplicate_of = outcome.duplicate_of
+                except Exception as e:
+                    dedup_action = f"error: {e}"
+
+            # Marquer comme lu : nouveau bug, bug mis à jour, ou doublon confirmé
             reader.mark_as_read(email.uid)
             marked_as_read = True
 
@@ -131,6 +149,8 @@ async def process_unread_emails(
                 marked_as_read=marked_as_read,
                 skipped=False,
                 skip_reason=None,
+                dedup_action=dedup_action,
+                dedup_duplicate_of=dedup_duplicate_of,
             )
         )
 

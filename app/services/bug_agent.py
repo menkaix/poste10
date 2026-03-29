@@ -51,7 +51,11 @@ _SYSTEM_PROMPT = """Tu es un agent de triage d'emails spécialisé dans la déte
 - `type` : toujours `"BUG"` pour un rapport de bug
 - `severity` : `CRITICAL` | `HIGH` | `MEDIUM` | `LOW` | `INFO` — déduire de l'urgence/impact
 - `reporter` : adresse email de l'expéditeur
-- `environment` : environnement mentionné (production, staging, dev…)
+- `environment` : environnement mentionné — déduire selon ces règles :
+  - Si une URL dans l'email contient `qualif` ou `qualification` → `"qualification"`
+  - Si une URL dans l'email contient `dev`, `development` ou `developpement` → `"development"`
+  - Si aucune URL mais mention explicite de l'environnement → utiliser la valeur mentionnée
+  - Sinon → `"production"` (valeur par défaut si non précisé)
 - `platform` : `WEB` | `MOBILE_IOS` | `MOBILE_ANDROID` | `API` | `MICROSERVICE` | `CLOUD_FUNCTION` — si mentionné
 - `component` : nom du composant ou microservice concerné, si mentionné
 - `affectedVersion` : version affectée, si mentionnée
