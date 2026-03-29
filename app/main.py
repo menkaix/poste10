@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.routers import emails, health
+from app.routers import emails, health, issues
 
 app = FastAPI(
     title="Poste10 API",
@@ -9,3 +9,4 @@ app = FastAPI(
 
 app.include_router(health.router)
 app.include_router(emails.router)
+app.include_router(issues.router)

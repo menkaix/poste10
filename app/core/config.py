@@ -11,6 +11,9 @@ class Settings(BaseSettings):
 
     google_api_key: str
 
+    qdrant_host: str
+    qdrant_api_key: str
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 
