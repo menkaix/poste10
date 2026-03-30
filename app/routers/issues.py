@@ -66,3 +66,28 @@ def deduplicate_bugs(
         ))
 
     return results
+
+
+class DeletionSummary(BaseModel):
+    deleted: int
+    errors: list[dict]
+
+
+@router.delete("/duplicates", response_model=DeletionSummary)
+def delete_duplicates(
+    n: int = Query(default=100, ge=1, le=500, description="Nombre max de doublons à supprimer"),
+):
+    """Supprime toutes les issues marquées DUPLICATE dans le backlog."""
+    duplicates = backlog_client.get_duplicates(size=n)
+    deleted = 0
+    errors = []
+
+    for issue in duplicates:
+        issue_id = issue.get("id", "")
+        try:
+            backlog_client.delete_issue(issue_id)
+            deleted += 1
+        except Exception as e:
+            errors.append({"issue_id": issue_id, "detail": str(e)})
+
+    return DeletionSummary(deleted=deleted, errors=errors)

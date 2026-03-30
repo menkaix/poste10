@@ -32,6 +32,21 @@ def get_bugs(page: int = 0, size: int = 20) -> list[dict]:
     return [i for i in items if i.get("type") == "BUG"][:size]
 
 
+def get_duplicates(size: int = 100) -> list[dict]:
+    """Récupère les issues marquées DUPLICATE."""
+    resp = httpx.get(
+        _url("/issue/by-status/DUPLICATE"),
+        params={"size": size},
+        headers=_headers(),
+        verify=False,
+        timeout=_TIMEOUT,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    items = data if isinstance(data, list) else data.get("content", [])
+    return items[:size]
+
+
 def get_issue(issue_id: str) -> dict:
     resp = httpx.get(_url(f"/issue/{issue_id}"), headers=_headers(), verify=False, timeout=_TIMEOUT)
     resp.raise_for_status()
