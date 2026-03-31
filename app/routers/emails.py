@@ -7,10 +7,12 @@ from pydantic import BaseModel
 
 from app.core.config import settings
 from app.services import backlog_client
-from app.services.bug_agent import BugProcessingResult, fetch_mcp_tool_schemas, process_email_for_bugs
-from app.services.dedup_service import deduplicate_issue
+from app.services.bug_report_agent import BugReportResult, create_bug_report, fetch_report_tool_schemas
+from app.services.bug_search_agent import BugSearchResult, search_similar_bug, fetch_search_tool_schemas
+from app.services.bug_merge_agent import BugMergeResult, merge_duplicate_bug
 from app.services.email_reader import EmailMessage, ImapEmailReader
 from app.services.mcp_client import mcp_session
+from app.services.qdrant_dedup import index_issue
 
 router = APIRouter(prefix="/emails", tags=["emails"])
 
@@ -23,7 +25,7 @@ class EmailProcessingResult(BaseModel):
     sender: str
     date: str
     is_bug: bool
-    action: Literal["created", "updated", "none"]
+    action: Literal["created", "none"]
     issue_id: Optional[str]
     summary: str
     marked_as_read: bool
@@ -57,9 +59,10 @@ async def process_unread_emails(
         description="Si true, traiter tous les emails sans limite d'âge",
     ),
 ):
-    """Récupère les n derniers emails non lus, filtre ceux de plus de `max_age_hours` heures
-    (sauf si `ignore_age=true`), puis analyse avec un agent LangChain.
-    L'email est marqué comme lu uniquement s'il s'agit d'un rapport de bug.
+    """Traite les emails non lus via un pipeline à 3 agents spécialisés :
+    1. Agent de rapport  : détecte si c'est un bug et crée une issue structurée
+    2. Agent de recherche : cherche un bug similaire dans Qdrant (RAG) et le backlog (MCP)
+    3. Agent de fusion   : si doublon, génère un commentaire contextuel et fusionne
     """
     reader = ImapEmailReader(
         host=settings.imap_host,
@@ -86,7 +89,6 @@ async def process_unread_emails(
 
     results: list[EmailProcessingResult] = []
 
-    # Résultats pour les emails ignorés (sans appel à l'agent)
     for email, age in skipped_old:
         results.append(
             EmailProcessingResult(
@@ -107,34 +109,60 @@ async def process_unread_emails(
     if not to_process:
         return results
 
-    # Charger les schémas MCP une fois pour tous les emails
+    # Pré-charger les schémas MCP une fois pour tous les emails
     async with mcp_session() as init_session:
-        schemas = await fetch_mcp_tool_schemas(init_session)
+        report_schemas = await fetch_report_tool_schemas(init_session)
+        search_schemas = await fetch_search_tool_schemas(init_session)
 
     for email in to_process:
+        # --- Agent 1 : Rapport de bug ---
         async with mcp_session() as session:
-            agent_result: BugProcessingResult = await process_email_for_bugs(
-                email, session, mcp_tool_schemas=schemas
+            report: BugReportResult = await create_bug_report(
+                email, session, mcp_tool_schemas=report_schemas
             )
 
-        marked_as_read = False
-        dedup_action = None
-        dedup_duplicate_of = None
+        dedup_action: Optional[str] = None
+        dedup_duplicate_of: Optional[str] = None
 
-        if agent_result.is_bug:
-            # Déduplication pour les nouveaux bugs créés (avant mark_as_read pour connaître l'outcome)
-            if agent_result.action == "created" and agent_result.issue_id:
-                try:
-                    issue = backlog_client.get_issue(agent_result.issue_id)
-                    outcome = deduplicate_issue(issue)
-                    dedup_action = outcome.action
-                    dedup_duplicate_of = outcome.duplicate_of
-                except Exception as e:
-                    dedup_action = f"error: {e}"
+        if report.is_bug and report.issue_id:
+            try:
+                issue = backlog_client.get_issue(report.issue_id)
+            except Exception as e:
+                dedup_action = f"error: impossible de récupérer l'issue ({e})"
+                issue = None
 
-            # Marquer comme lu : nouveau bug, bug mis à jour, ou doublon confirmé
+            if issue:
+                # --- Agent 2 : Recherche de doublon ---
+                async with mcp_session() as session:
+                    search_result: BugSearchResult = await search_similar_bug(
+                        issue,
+                        session,
+                        mcp_tool_schemas=search_schemas,
+                        exclude_id=report.issue_id,
+                    )
+
+                if search_result.found and search_result.issue_id:
+                    # --- Agent 3 : Fusion ---
+                    try:
+                        original_issue = backlog_client.get_issue(search_result.issue_id)
+                        merge_result: BugMergeResult = await merge_duplicate_bug(
+                            issue,
+                            original_issue,
+                            similarity_score=search_result.score or 0.0,
+                        )
+                        dedup_action = merge_result.action
+                        dedup_duplicate_of = search_result.issue_id
+                    except Exception as e:
+                        dedup_action = f"error: {e}"
+                else:
+                    # Nouveau bug unique : indexer dans Qdrant pour les futures recherches
+                    try:
+                        index_issue(issue)
+                        dedup_action = "indexed"
+                    except Exception as e:
+                        dedup_action = f"error: indexation Qdrant ({e})"
+
             reader.mark_as_read(email.uid)
-            marked_as_read = True
 
         results.append(
             EmailProcessingResult(
@@ -142,11 +170,11 @@ async def process_unread_emails(
                 subject=email.subject,
                 sender=email.sender,
                 date=email.date,
-                is_bug=agent_result.is_bug,
-                action=agent_result.action,
-                issue_id=agent_result.issue_id,
-                summary=agent_result.summary,
-                marked_as_read=marked_as_read,
+                is_bug=report.is_bug,
+                action="created" if report.is_bug and report.issue_id else "none",
+                issue_id=report.issue_id,
+                summary=report.summary,
+                marked_as_read=report.is_bug,
                 skipped=False,
                 skip_reason=None,
                 dedup_action=dedup_action,
