@@ -11,8 +11,8 @@ from dataclasses import dataclass
 from typing import Literal, Optional
 
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.prebuilt import create_react_agent
+from langchain_core.messages import HumanMessage
+from langchain.agents import create_agent
 from mcp import ClientSession
 from pydantic import BaseModel
 
@@ -118,10 +118,10 @@ async def create_bug_report(
         google_api_key=settings.google_api_key,
     )
 
-    graph = create_react_agent(
+    graph = create_agent(
         llm,
         tools,
-        state_modifier=SystemMessage(content=_SYSTEM_PROMPT),
+        system_prompt=_SYSTEM_PROMPT,
         response_format=_BugReportOutput,
     )
 
