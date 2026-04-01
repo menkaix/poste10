@@ -11,9 +11,9 @@ from dataclasses import dataclass
 from typing import Optional
 
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import StructuredTool
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 from mcp import ClientSession
 from pydantic import BaseModel, Field
 
@@ -142,10 +142,10 @@ async def search_similar_bug(
         google_api_key=settings.google_api_key,
     )
 
-    graph = create_react_agent(
+    graph = create_agent(
         llm,
         all_tools,
-        state_modifier=SystemMessage(content=_SYSTEM_PROMPT),
+        system_prompt=_SYSTEM_PROMPT,
         response_format=_BugSearchOutput,
     )
 
