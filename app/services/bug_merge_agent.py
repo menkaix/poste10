@@ -114,7 +114,7 @@ async def merge_duplicate_bug(
     1. Génère un commentaire contextuel (Chain LLM)
     2. Ajoute le commentaire sur l'issue originale (REST)
     3. Met l'original à TRIAGED si OPEN (REST)
-    4. Marque le doublon comme DUPLICATE (REST)
+    4. Supprime la nouvelle issue (doublon non créé dans le backlog)
     """
     original_id = original_issue.get("id", "")
     new_id = new_issue.get("id", "")
@@ -130,14 +130,15 @@ async def merge_duplicate_bug(
         backlog_client.add_comment(original_id, _BOT_AUTHOR, comment)
         if original_issue.get("status") == "OPEN":
             backlog_client.update_issue_status(original_id, "TRIAGED")
-        backlog_client.mark_as_duplicate(new_id, original_id)
+        if new_id:
+            backlog_client.delete_issue(new_id)
         return BugMergeResult(
             action="merged",
             comment=comment,
             detail=(
-                f"{detail_prefix}Fusionné avec #{original_id} "
+                f"{detail_prefix}Doublon de #{original_id} "
                 f"(similarité {similarity_score:.1%}). "
-                "Commentaire ajouté, doublon marqué DUPLICATE."
+                "Commentaire ajouté sur l'original, nouvelle issue supprimée."
             ),
         )
     except Exception as e:

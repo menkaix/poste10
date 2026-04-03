@@ -12,7 +12,9 @@ from app.services.bug_search_agent import BugSearchResult, search_similar_bug, f
 from app.services.bug_merge_agent import BugMergeResult, merge_duplicate_bug
 from app.services.email_reader import EmailMessage, ImapEmailReader
 from app.services.mcp_client import mcp_session
-from app.services.qdrant_dedup import index_issue
+import httpx
+
+from app.services.qdrant_dedup import index_issue, remove_issue
 
 router = APIRouter(prefix="/emails", tags=["emails"])
 
@@ -124,6 +126,8 @@ async def process_unread_emails(
         dedup_action: Optional[str] = None
         dedup_duplicate_of: Optional[str] = None
 
+        issue_kept = False  # True si la nouvelle issue est conservée dans le backlog
+
         if report.is_bug and report.issue_id:
             try:
                 issue = backlog_client.get_issue(report.issue_id)
@@ -143,6 +147,7 @@ async def process_unread_emails(
 
                 if search_result.found and search_result.issue_id:
                     # --- Agent 3 : Fusion ---
+                    # Doublon détecté : ajouter un commentaire sur l'original et supprimer la nouvelle issue
                     try:
                         original_issue = backlog_client.get_issue(search_result.issue_id)
                         merge_result: BugMergeResult = await merge_duplicate_bug(
@@ -152,15 +157,37 @@ async def process_unread_emails(
                         )
                         dedup_action = merge_result.action
                         dedup_duplicate_of = search_result.issue_id
+                        # La nouvelle issue a été supprimée par merge_duplicate_bug
+                    except httpx.HTTPStatusError as e:
+                        if e.response.status_code == 404:
+                            # L'issue référencée dans Qdrant n'existe plus dans le backlog :
+                            # nettoyer l'entrée orpheline et traiter le bug comme unique
+                            try:
+                                remove_issue(search_result.issue_id)
+                            except Exception:
+                                pass
+                            try:
+                                index_issue(issue)
+                                dedup_action = "indexed (orphan nettoyé)"
+                                issue_kept = True
+                            except Exception as idx_err:
+                                dedup_action = f"error: indexation ({idx_err})"
+                                issue_kept = True
+                        else:
+                            dedup_action = f"error: {e}"
+                            issue_kept = True
                     except Exception as e:
                         dedup_action = f"error: {e}"
+                        issue_kept = True  # Suppression échouée, l'issue existe encore
                 else:
                     # Nouveau bug unique : indexer dans Qdrant pour les futures recherches
                     try:
                         index_issue(issue)
                         dedup_action = "indexed"
+                        issue_kept = True
                     except Exception as e:
                         dedup_action = f"error: indexation Qdrant ({e})"
+                        issue_kept = True
 
             reader.mark_as_read(email.uid)
 
@@ -171,8 +198,8 @@ async def process_unread_emails(
                 sender=email.sender,
                 date=email.date,
                 is_bug=report.is_bug,
-                action="created" if report.is_bug and report.issue_id else "none",
-                issue_id=report.issue_id,
+                action="created" if issue_kept else "none",
+                issue_id=report.issue_id if issue_kept else None,
                 summary=report.summary,
                 marked_as_read=report.is_bug,
                 skipped=False,
