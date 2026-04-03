@@ -6,8 +6,10 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.services import backlog_client
+from app.services.bug_consolidation_agent import ConsolidationResult, consolidate_issues, fetch_consolidation_tool_schemas
 from app.services.dedup_service import DeduplicationOutcome, deduplicate_issue
-from app.services.qdrant_dedup import embed_issue
+from app.services.mcp_client import mcp_session
+from app.services.qdrant_dedup import embed_issue, index_issue, remove_issue
 
 router = APIRouter(prefix="/issues", tags=["issues"])
 
@@ -66,6 +68,84 @@ def deduplicate_bugs(
         ))
 
     return results
+
+
+class ConsolidationRequest(BaseModel):
+    issue_ids: list[str]
+
+
+class ConsolidationSummary(BaseModel):
+    new_issue_id: str
+    new_issue_title: str
+    summary: str
+    sources_count: int
+    deleted: list[str]
+    errors: list[dict]
+
+
+@router.post("/consolidate", response_model=ConsolidationSummary)
+async def consolidate_issues_endpoint(body: ConsolidationRequest):
+    """Fusionne plusieurs issues en une seule issue exhaustive.
+
+    1. Récupère chaque issue depuis le backlog (descriptions, métadonnées, commentaires).
+    2. L'agent de consolidation analyse l'ensemble et crée une nouvelle issue via MCP.
+    3. La nouvelle issue est indexée dans Qdrant.
+    4. Les issues sources sont supprimées du backlog et de Qdrant.
+    """
+    if len(body.issue_ids) < 2:
+        raise HTTPException(status_code=422, detail="Au moins 2 issue_ids sont requis.")
+
+    # 1. Récupérer toutes les issues sources
+    issues: list[dict] = []
+    fetch_errors: list[dict] = []
+    for issue_id in body.issue_ids:
+        try:
+            issues.append(backlog_client.get_issue(issue_id))
+        except Exception as e:
+            fetch_errors.append({"issue_id": issue_id, "detail": str(e)})
+
+    if len(issues) < 2:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Impossible de récupérer suffisamment d'issues ({len(issues)}/{len(body.issue_ids)}). "
+                   f"Erreurs : {fetch_errors}",
+        )
+
+    # 2. Appeler l'agent de consolidation
+    async with mcp_session() as session:
+        schemas = await fetch_consolidation_tool_schemas(session)
+        result: ConsolidationResult = await consolidate_issues(issues, session, mcp_tool_schemas=schemas)
+
+    # 3. Indexer la nouvelle issue dans Qdrant
+    try:
+        new_issue = backlog_client.get_issue(result.issue_id)
+        index_issue(new_issue)
+    except Exception:
+        pass  # Non bloquant
+
+    # 4. Supprimer les issues sources du backlog et de Qdrant
+    deleted: list[str] = []
+    delete_errors: list[dict] = []
+    for issue in issues:
+        issue_id = issue.get("id", "")
+        try:
+            backlog_client.delete_issue(issue_id)
+            deleted.append(issue_id)
+        except Exception as e:
+            delete_errors.append({"issue_id": issue_id, "detail": str(e)})
+        try:
+            remove_issue(issue_id)
+        except Exception:
+            pass  # Qdrant : non bloquant
+
+    return ConsolidationSummary(
+        new_issue_id=result.issue_id,
+        new_issue_title=result.title,
+        summary=result.summary,
+        sources_count=len(issues),
+        deleted=deleted,
+        errors=fetch_errors + delete_errors,
+    )
 
 
 class DeletionSummary(BaseModel):
