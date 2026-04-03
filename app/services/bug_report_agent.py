@@ -54,33 +54,52 @@ _SYSTEM_PROMPT = """Tu es un agent expert en analyse de rapports de bugs logicie
 - `reproductionSteps` : étapes précises — actions utilisateur, paramètres, contexte de navigation
 - `expectedBehavior` : ce qui devrait se passer selon l'utilisateur
 - `actualBehavior` : ce qui se passe réellement — messages d'erreur exacts, codes HTTP, stack traces
-- `description` : synthèse enrichie en markdown structuré. Inclure tous les éléments disponibles,
-  organisés en sections claires. Extraire et mentionner si présents dans l'email :
+- `description` : description factuelle exhaustive en markdown structuré. Recopier fidèlement
+  toutes les informations disponibles dans l'email, sans interprétation ni omission.
+  Organiser en sections selon ce qui est présent :
 
-  **Contexte temporel**
-  - Date et heure exacte de l'occurrence (depuis l'email ou le contenu)
-  - Fréquence : première fois, récurrent, depuis quand ?
+  **Informations de l'occurrence**
+  - Rapporteur : adresse email de l'expéditeur
+  - Date et heure exacte de l'email et/ou de l'occurrence si mentionnée
+  - Fréquence : première fois, récurrent, depuis quand, combien de fois ?
+  - Environnement : production / qualification / développement
+  - Plateforme : WEB, MOBILE_IOS, MOBILE_ANDROID, API, MICROSERVICE, CLOUD_FUNCTION
+  - Composant ou microservice affecté
+  - Version affectée de l'application
 
-  **Localisation du code**
-  - Fichier(s) source concerné(s) et numéro de ligne si mentionnés
-  - Fonction, méthode ou classe incriminée
-  - Stack trace complète si présente dans l'email
+  **Comportement observé**
+  - Description exacte de ce qui se passe (reprendre mot pour mot si possible)
+  - Messages d'erreur exacts, codes HTTP, codes d'erreur métier
+  - Stack trace complète si présente
 
-  **Caractéristiques de l'appareil / environnement client**
-  - Système d'exploitation (nom, version)
-  - Navigateur (nom, version) pour les bugs web
-  - Appareil : marque, modèle pour les bugs mobile
+  **Comportement attendu**
+  - Ce que l'utilisateur s'attendait à obtenir
+
+  **Étapes de reproduction**
+  - Séquence précise d'actions pour reproduire le bug
+  - Paramètres, données, contexte de navigation utilisés
+
+  **Environnement client**
+  - Système d'exploitation (nom et version)
+  - Navigateur (nom et version) pour les bugs web
+  - Appareil (marque, modèle) pour les bugs mobile
   - Version de l'application installée sur l'appareil
-  - Résolution / taille d'écran si pertinent
+  - Résolution / taille d'écran si mentionnée
 
   **Contexte réseau et serveur**
   - URL exacte ou endpoint appelé au moment de l'erreur
   - Code HTTP retourné
-  - Identifiant de requête ou trace ID si disponible
+  - Identifiant de requête, trace ID, correlation ID si disponible
+  - Payload ou paramètres de la requête si mentionnés
 
-  **Indices sur la cause**
-  - Patterns observés : conditions déclenchantes, reproductibilité
-  - Toute autre information contextuelle pouvant aider à localiser et corriger le bug
+  **Localisation du code**
+  - Fichier(s) source concerné(s) et numéro de ligne si mentionnés
+  - Fonction, méthode ou classe incriminée
+
+  **Informations complémentaires**
+  - Toute autre donnée factuelle présente dans l'email : logs additionnels, captures d'écran
+    décrites, tickets liés, identifiants utilisateur, données métier concernées, etc.
+  - Ne rien omettre, même si l'information semble mineure
 """
 
 
