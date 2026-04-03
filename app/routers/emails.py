@@ -117,16 +117,32 @@ async def process_unread_emails(
         search_schemas = await fetch_search_tool_schemas(init_session)
 
     for email in to_process:
-        # --- Agent 1 : Rapport de bug ---
-        async with mcp_session() as session:
-            report: BugReportResult = await create_bug_report(
-                email, session, mcp_tool_schemas=report_schemas
-            )
-
         dedup_action: Optional[str] = None
         dedup_duplicate_of: Optional[str] = None
-
         issue_kept = False  # True si la nouvelle issue est conservée dans le backlog
+
+        # --- Agent 1 : Rapport de bug ---
+        try:
+            async with mcp_session() as session:
+                report: BugReportResult = await create_bug_report(
+                    email, session, mcp_tool_schemas=report_schemas
+                )
+        except BaseException as e:
+            # LangGraph peut lever un ExceptionGroup (Python 3.11+) sur erreur LLM
+            results.append(EmailProcessingResult(
+                uid=email.uid,
+                subject=email.subject,
+                sender=email.sender,
+                date=email.date,
+                is_bug=False,
+                action="none",
+                issue_id=None,
+                summary="",
+                marked_as_read=False,
+                skipped=True,
+                skip_reason=f"error agent 1: {type(e).__name__}: {e}",
+            ))
+            continue
 
         if report.is_bug and report.issue_id:
             try:
@@ -137,15 +153,20 @@ async def process_unread_emails(
 
             if issue:
                 # --- Agent 2 : Recherche de doublon ---
-                async with mcp_session() as session:
-                    search_result: BugSearchResult = await search_similar_bug(
-                        issue,
-                        session,
-                        mcp_tool_schemas=search_schemas,
-                        exclude_id=report.issue_id,
-                    )
+                try:
+                    async with mcp_session() as session:
+                        search_result: BugSearchResult = await search_similar_bug(
+                            issue,
+                            session,
+                            mcp_tool_schemas=search_schemas,
+                            exclude_id=report.issue_id,
+                        )
+                except BaseException as e:
+                    dedup_action = f"error agent 2: {type(e).__name__}: {e}"
+                    issue_kept = True
+                    search_result = None  # type: ignore[assignment]
 
-                if search_result.found and search_result.issue_id:
+                if search_result is not None and search_result.found and search_result.issue_id:
                     # --- Agent 3 : Fusion ---
                     # Doublon détecté : ajouter un commentaire sur l'original et supprimer la nouvelle issue
                     try:
@@ -179,7 +200,7 @@ async def process_unread_emails(
                     except Exception as e:
                         dedup_action = f"error: {e}"
                         issue_kept = True  # Suppression échouée, l'issue existe encore
-                else:
+                elif search_result is not None:
                     # Nouveau bug unique : indexer dans Qdrant pour les futures recherches
                     try:
                         index_issue(issue)
@@ -188,6 +209,7 @@ async def process_unread_emails(
                     except Exception as e:
                         dedup_action = f"error: indexation Qdrant ({e})"
                         issue_kept = True
+                # else: search_result is None → Agent 2 a échoué, dedup_action/issue_kept déjà définis
 
             reader.mark_as_read(email.uid)
 
