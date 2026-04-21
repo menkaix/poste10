@@ -1,12 +1,11 @@
 """Déduplication des bugs via Qdrant (collection `bug-dedup`).
 
-Embedding : text-embedding-004 via Google AI (768 dims, compatible avec
-la collection issue-contexts du backlog service).
+Embedding : mistral-embed via Mistral AI (1024 dims).
 """
 from dataclasses import dataclass
 from typing import Optional
 
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_mistralai import MistralAIEmbeddings
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance,
@@ -18,20 +17,20 @@ from qdrant_client.models import (
 from app.core.config import settings
 
 _COLLECTION = "bug-dedup"
-_VECTOR_SIZE = 3072   # gemini-embedding-001
+_VECTOR_SIZE = 1024   # mistral-embed
 _SIMILARITY_THRESHOLD = 0.88  # au-dessus = doublon probable
 
 
-_embedding_model_instance: GoogleGenerativeAIEmbeddings | None = None
+_embedding_model_instance: MistralAIEmbeddings | None = None
 _qdrant_client_instance: QdrantClient | None = None
 
 
-def _embedding_model() -> GoogleGenerativeAIEmbeddings:
+def _embedding_model() -> MistralAIEmbeddings:
     global _embedding_model_instance
     if _embedding_model_instance is None:
-        _embedding_model_instance = GoogleGenerativeAIEmbeddings(
-            model="models/gemini-embedding-001",
-            google_api_key=settings.google_api_key,
+        _embedding_model_instance = MistralAIEmbeddings(
+            model="mistral-embed",
+            api_key=settings.mistral_api_key,
         )
     return _embedding_model_instance
 
