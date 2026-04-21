@@ -10,7 +10,7 @@ structuré sans parsing regex.
 from dataclasses import dataclass
 from typing import Optional
 
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_mistralai import ChatMistralAI
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import StructuredTool
 from langchain.agents import create_agent
@@ -137,9 +137,9 @@ async def search_similar_bug(
     qdrant_tool = _build_qdrant_tool(exclude_id=exclude_id)
     all_tools = [qdrant_tool] + mcp_tools
 
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        google_api_key=settings.google_api_key,
+    llm = ChatMistralAI(
+        model="mistral-large-latest",
+        api_key=settings.mistral_api_key,
     )
 
     graph = create_agent(

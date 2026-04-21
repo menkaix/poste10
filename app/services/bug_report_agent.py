@@ -10,7 +10,7 @@ et response_format pour l'extraction structurée sans parsing regex.
 from dataclasses import dataclass
 from typing import Literal, Optional
 
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_mistralai import ChatMistralAI
 from langchain_core.messages import HumanMessage
 from langchain.agents import create_agent
 from mcp import ClientSession
@@ -132,9 +132,9 @@ async def create_bug_report(
         mcp_tool_schemas = await fetch_mcp_tool_schemas(session, _CREATE_TOOLS)
     tools = build_tools_for_session(mcp_tool_schemas, session)
 
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        google_api_key=settings.google_api_key,
+    llm = ChatMistralAI(
+        model="mistral-large-latest",
+        api_key=settings.mistral_api_key,
     )
 
     graph = create_agent(

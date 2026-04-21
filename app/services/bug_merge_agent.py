@@ -10,7 +10,7 @@ La fusion REST (add_comment, mark_as_duplicate) est orchestrée directement.
 from dataclasses import dataclass
 from typing import Literal
 
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_mistralai import ChatMistralAI
 from langchain_core.prompts import ChatPromptTemplate
 
 from app.core.config import settings
@@ -91,9 +91,9 @@ def _fmt_issue(issue: dict) -> str:
 
 async def _generate_merge_comment(new_issue: dict, original_issue: dict, score: float) -> str:
     """Génère le commentaire de fusion via une Chain LangChain (prompt | llm)."""
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        google_api_key=settings.google_api_key,
+    llm = ChatMistralAI(
+        model="mistral-large-latest",
+        api_key=settings.mistral_api_key,
     )
     chain = _chain_prompt | llm
     response = await chain.ainvoke({

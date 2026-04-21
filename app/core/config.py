@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     imap_username: str
     imap_password: str
 
-    google_api_key: str
+    mistral_api_key: str
 
     qdrant_host: str
     qdrant_api_key: str
